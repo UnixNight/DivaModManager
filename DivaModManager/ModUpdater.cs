@@ -1,17 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.IO;
-using System.Text.Json;
-using System.Net.Http;
-using System.Threading;
-using DivaModManager.UI;
-using System.Windows;
+﻿using DivaModManager.UI;
 using SevenZipExtractor;
+using SharpCompress.Archives.SevenZip;
 using SharpCompress.Common;
 using SharpCompress.Readers;
-using SharpCompress.Archives.SevenZip;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -40,7 +41,11 @@ namespace DivaModManager
             }
             var cancellationToken = new CancellationTokenSource();
             var requestUrls = new Dictionary<string, List<string>>();
-            var DMArequestUrl = "https://divamodarchive.com/api/v1/posts/posts?";
+
+            // var DMArequestUrl = "https://divamodarchive.com/api/v1/posts/posts?";   // Original
+            var DMArequestUrl = "https://divamodarchive.com/api/v1/posts/";   // TODO: Does this actually fix it? 
+
+
             var mods = Directory.GetDirectories(path).Where(x => File.Exists($"{x}{Global.s}mod.json")).ToList();
             var modList = new Dictionary<string, List<string>>();
             var DMAmodList = new List<string>();
@@ -84,7 +89,9 @@ namespace DivaModManager
                     }
                     else if (metadata.id != null)
                     {
-                        DMArequestUrl += $"post_id={metadata.id}&";
+                        //This is in here because I don't know a better way to remove the metadata ID
+                        DMArequestUrl = "https://divamodarchive.com/api/v1/posts/"; //TODO. This sucks
+                        DMArequestUrl += $"{metadata.id}";
                         DMAmodList.Add(mod);
                     }
                 }
@@ -101,7 +108,7 @@ namespace DivaModManager
                 }
 
             }
-            if (requestUrls.Count == 0 && !DMArequestUrl.Contains("post_id"))
+            if (requestUrls.Count == 0 && !DMArequestUrl.Contains("post/"))
             {
                 Global.logger.WriteLine("No mod updates available.", LoggerType.Info);
                 main.GameBox.IsEnabled = true;
@@ -146,69 +153,85 @@ namespace DivaModManager
                     }
                 }
                 // DivaModArchive updates
-                if (DMArequestUrl.Contains("post_id"))
+                if (DMArequestUrl.Contains("posts/"))
                 {
-                    var responseString = await client.GetStringAsync(DMArequestUrl);
-                    DMAresponse = JsonSerializer.Deserialize<List<DivaModArchivePost>>(responseString);
-                }
-            }
-            var convertedModList = new List<string>();
-            foreach (var type in modList)
-                foreach (var mod in type.Value)
-                    convertedModList.Add(mod);
-            for (int i = 0; i < convertedModList.Count; i++)
-            {
-                Metadata metadata;
-                try
-                {
-                    metadata = JsonSerializer.Deserialize<Metadata>(File.ReadAllText($"{convertedModList[i]}{Global.s}mod.json"));
-                }
-                catch (Exception e)
-                {
-                    Global.logger.WriteLine($"Error occurred while getting metadata for {convertedModList[i]} ({e.Message})", LoggerType.Error);
-                    continue;
-                }
-                await ModUpdate(response[i], convertedModList[i], metadata, new Progress<DownloadProgress>(ReportUpdateProgress), CancellationTokenSource.CreateLinkedTokenSource(cancellationToken.Token));
-            }
+                    try
+                    {
+                        Debug.WriteLine(DMArequestUrl);
+                        var responseString = await client.GetStringAsync(DMArequestUrl);
 
-            if (DMAresponse.Count > 0)
-            {
-                foreach (var DMAmod in DMAmodList)
+                        Debug.WriteLine(responseString);
+                        DMAresponse = JsonSerializer.Deserialize<List<DivaModArchivePost>>(responseString);
+
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.WriteLine("This is broken");
+                        Debug.WriteLine(e);
+
+                    }
+
+
+                }
+
+                var convertedModList = new List<string>();
+                foreach (var type in modList)
+                    foreach (var mod in type.Value)
+                        convertedModList.Add(mod);
+                for (int i = 0; i < convertedModList.Count; i++)
                 {
                     Metadata metadata;
                     try
                     {
-                        metadata = JsonSerializer.Deserialize<Metadata>(File.ReadAllText($"{DMAmod}{Global.s}mod.json"));
+                        metadata = JsonSerializer.Deserialize<Metadata>(File.ReadAllText($"{convertedModList[i]}{Global.s}mod.json"));
                     }
                     catch (Exception e)
                     {
-                        Global.logger.WriteLine($"Error occurred while getting metadata for {DMAmod} ({e.Message})", LoggerType.Error);
+                        Global.logger.WriteLine($"Error occurred while getting metadata for {convertedModList[i]} ({e.Message})", LoggerType.Error);
                         continue;
                     }
-                    var index = DMAresponse.FindIndex(x => x.ID == metadata.id);
-                    if (index != -1)
-                        await ModUpdate(DMAresponse[index], DMAmod, metadata, new Progress<DownloadProgress>(ReportUpdateProgress), CancellationTokenSource.CreateLinkedTokenSource(cancellationToken.Token));
-                    else
-                        Global.logger.WriteLine($"{Path.GetFileName(DMAmod)} was most likely trashed by the creator and cannot receive anymore updates", LoggerType.Warning);
-
+                    await ModUpdate(response[i], convertedModList[i], metadata, new Progress<DownloadProgress>(ReportUpdateProgress), CancellationTokenSource.CreateLinkedTokenSource(cancellationToken.Token));
                 }
+
+                if (DMAresponse.Count > 0)
+                {
+                    foreach (var DMAmod in DMAmodList)
+                    {
+                        Metadata metadata;
+                        try
+                        {
+                            metadata = JsonSerializer.Deserialize<Metadata>(File.ReadAllText($"{DMAmod}{Global.s}mod.json"));
+                        }
+                        catch (Exception e)
+                        {
+                            Global.logger.WriteLine($"Error occurred while getting metadata for {DMAmod} ({e.Message})", LoggerType.Error);
+                            continue;
+                        }
+                        var index = DMAresponse.FindIndex(x => x.ID == metadata.id);
+                        if (index != -1)
+                            await ModUpdate(DMAresponse[index], DMAmod, metadata, new Progress<DownloadProgress>(ReportUpdateProgress), CancellationTokenSource.CreateLinkedTokenSource(cancellationToken.Token));
+                        else
+                            Global.logger.WriteLine($"{Path.GetFileName(DMAmod)} was most likely trashed by the creator and cannot receive anymore updates", LoggerType.Warning);
+
+                    }
+                }
+
+                if (updateCounter == 0)
+                    Global.logger.WriteLine("No mod updates available.", LoggerType.Info);
+                else
+                    Global.logger.WriteLine("Done checking for mod updates!", LoggerType.Info);
+
+                main.GameBox.IsEnabled = true;
+                main.ModGrid.IsEnabled = true;
+                main.ConfigButton.IsEnabled = true;
+                main.LaunchButton.IsEnabled = true;
+                main.OpenModsButton.IsEnabled = true;
+                main.UpdateButton.IsEnabled = true;
+                main.LauncherOptionsBox.IsEnabled = true;
+                main.LoadoutBox.IsEnabled = true;
+                main.EditLoadoutsButton.IsEnabled = true;
+                main.Activate();
             }
-
-            if (updateCounter == 0)
-                Global.logger.WriteLine("No mod updates available.", LoggerType.Info);
-            else
-                Global.logger.WriteLine("Done checking for mod updates!", LoggerType.Info);
-
-            main.GameBox.IsEnabled = true;
-            main.ModGrid.IsEnabled = true;
-            main.ConfigButton.IsEnabled = true;
-            main.LaunchButton.IsEnabled = true;
-            main.OpenModsButton.IsEnabled = true;
-            main.UpdateButton.IsEnabled = true;
-            main.LauncherOptionsBox.IsEnabled = true;
-            main.LoadoutBox.IsEnabled = true;
-            main.EditLoadoutsButton.IsEnabled = true;
-            main.Activate();
         }
         private static void ReportUpdateProgress(DownloadProgress progress)
         {
