@@ -157,18 +157,13 @@ namespace DivaModManager
                 {
                     try
                     {
-                        Debug.WriteLine(DMArequestUrl);
                         var responseString = await client.GetStringAsync(DMArequestUrl);
-
-                        Debug.WriteLine(responseString);
                         DMAresponse = JsonSerializer.Deserialize<List<DivaModArchivePost>>(responseString);
 
                     }
                     catch (Exception e)
                     {
-                        Debug.WriteLine("This is broken");
-                        Debug.WriteLine(e);
-
+                        Global.logger.WriteLine($"Error occurred while getting DMA Posts ({e.Message})", LoggerType.Error);
                     }
 
 
